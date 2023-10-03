@@ -188,6 +188,84 @@ contract Loot is Admins {
         return (false);
     }
 
+    /**
+     * @dev Allows the user an attempt to claim a specified loot box.
+     * @param proof bytes32 array for proof.
+     * @param _LootID Unique loot ID.
+     * @param _LootBoxID Specified loot box ID.
+     * Note: WARNING - Unauthorized attempts may cause user negative effects, NO CHEATING.
+     */
+    function tryClaimLoot(bytes32[] memory proof, uint256 _LootID, uint256 _LootBoxID) public {
+        require(verifyClaim(proof, _LootID, _LootBoxID), "Cannot claim loot.");
+        address _erc20_Contract = LootBoxID[_LootBoxID].erc20.tokenAddress;
+        uint256 _erc20_LootAmount = LootBoxID[_LootBoxID].erc20.balance;
+        address _erc721_Contract = LootBoxID[_LootBoxID].erc721.tokenAddress;
+        address _erc1155_Contract = LootBoxID[_LootBoxID].erc1155.tokenAddress;
+
+        if(_erc20_LootAmount > 0){
+            if(thisHasThatLoot(_LootBoxID, 20)){
+                // Send ERC20 tokens to claimer
+                IERC20(_erc20_Contract).transfer(msg.sender, _erc20_LootAmount);
+            }
+            else{
+                // Send alt ERC20
+            }
+        }
+
+        //❌ ADD OTHER TOKEN TYPES HERE LATER ❌
+    }
+
+    /**
+     * @dev Verify if this contract has the Loot for a specified LootBox.
+     * @param _LootBoxID Specified loot box ID.
+     * @param _tokenType Types are either 20, 721, 1155, or 0 for all three types.
+     */
+    function thisHasThatLoot(uint256 _LootBoxID, uint256 _tokenType) public view returns (bool) {
+        require(_tokenType == 0 || _tokenType == 20 || _tokenType == 721 || _tokenType == 1155, "Invalid token type.");
+
+        ERC20Token storage erc20Token = LootBoxID[_LootBoxID].erc20;
+        ERC721Token storage erc721Token = LootBoxID[_LootBoxID].erc721;
+        ERC1155Token storage erc1155Token = LootBoxID[_LootBoxID].erc1155;
+
+        if ((_tokenType == 0 || _tokenType == 20) && IERC20(erc20Token.tokenAddress).balanceOf(address(this)) < erc20Token.balance) {
+            return false;
+        }
+
+        if (_tokenType == 0 || _tokenType == 721) {
+            uint256[] storage erc721TokenIDs = erc721Token.tokenIDs;
+            uint256 erc721TokenIDsLength = erc721TokenIDs.length;
+
+            for (uint256 i = 0; i < erc721TokenIDsLength; i++) {
+                uint256 _tokenID = erc721TokenIDs[i];
+                if (IERC721(erc721Token.tokenAddress).ownerOf(_tokenID) != address(this)) {
+                    return false;
+                }
+            }
+        }
+
+        if (_tokenType == 0 || _tokenType == 1155) {
+            uint256[] storage erc1155TokenIDs = erc1155Token.tokenIDs;
+            uint256[] storage erc1155Balances = erc1155Token.balances;
+            uint256 erc1155TokenIDsLength = erc1155TokenIDs.length;
+
+            address[] memory accountsArray = new address[](erc1155TokenIDsLength);
+            for (uint256 j = 0; j < erc1155TokenIDsLength; j++) {
+                accountsArray[j] = address(this);
+            }
+
+            uint256[] memory _balances = IERC1155(erc1155Token.tokenAddress).balanceOfBatch(accountsArray, erc1155TokenIDs);
+
+            for (uint256 i = 0; i < erc1155TokenIDsLength; i++) {
+                uint256 _tokenAmount = erc1155Balances[i];
+                if (_balances[i] < _tokenAmount) {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+
     // Initialize empty data for ERC20, ERC721, and ERC1155 tokens then push an empty LootBox
     function initTokenBundles() internal {
         require(LootBoxID.length == 0);
