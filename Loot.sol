@@ -11,7 +11,8 @@ import "https://github.com/OpenZeppelin/openzeppelin-contracts/blob/master/contr
 contract Loot is Admins {
     
     mapping(uint256 => uint256) public availableLootBoxes;
-    mapping(uint256 => mapping(uint256 => bool)) public claimedLootID;
+    mapping(address => mapping(uint256 => uint256)) public lootBoxVoucher;
+    //mapping(address => bool) public voucherOnly;
 
     /*Tokens this contract holds*/
     mapping(address => uint256) public erc20ContractBalance;
@@ -52,10 +53,9 @@ contract Loot is Admins {
     ERC721Token[] public ERC721BundleID;
     ERC1155Token[] public ERC1155BundleID;
 
-    event LootBoxCreated(uint256 lootBoxId, address creator);
+    event LootBoxCreated(uint256 lootBoxID, address creator);
 
-    error Unavailable();
-    error Invalid();
+    error LootAlreadyClaimed(uint256 lootBoxID);
     /* 
     address(0) = 0x0000000000000000000000000000000000000000
     */
@@ -91,16 +91,16 @@ contract Loot is Admins {
         });
         
         // Add the Loot Box to the array
-        uint256 newLootBoxId = LootBoxID.length;
+        uint256 newLootBoxID = LootBoxID.length;
         LootBoxID.push(newLootBox);
 
         // Set available quantity
-        availableLootBoxes[newLootBoxId] = _qty;
+        availableLootBoxes[newLootBoxID] = _qty;
         
         // Emit an event to log the creation
-        emit LootBoxCreated(newLootBoxId, msg.sender);
+        emit LootBoxCreated(newLootBoxID, msg.sender);
         
-        return newLootBoxId;
+        return newLootBoxID;
     }
 
     /**
@@ -189,7 +189,7 @@ contract Loot is Admins {
     }
 
     /**
-     * @dev Allows the user an attempt to claim a specified loot box.
+     * @dev Allows the user an attempt to claim a specified loot box or voucher.
      * @param proof bytes32 array for proof.
      * @param _LootID Unique loot ID.
      * @param _LootBoxID Specified loot box ID.
@@ -198,21 +198,64 @@ contract Loot is Admins {
     function tryClaimLoot(bytes32[] memory proof, uint256 _LootID, uint256 _LootBoxID) public {
         require(verifyClaim(proof, _LootID, _LootBoxID), "Cannot claim loot.");
         address _erc20_Contract = LootBoxID[_LootBoxID].erc20.tokenAddress;
-        uint256 _erc20_LootAmount = LootBoxID[_LootBoxID].erc20.balance;
         address _erc721_Contract = LootBoxID[_LootBoxID].erc721.tokenAddress;
         address _erc1155_Contract = LootBoxID[_LootBoxID].erc1155.tokenAddress;
+        uint256 voucher;
 
-        if(_erc20_LootAmount > 0){
+        /*
+        if(voucherOnly[msg.sender]){
+            // ❌ ADD FUNCTION IF USER WOULD LIKE TO CLAIM LOOT AT A LATER TIME BY CONSUMING A VOUCHER❌ 
+            //     - For instance if a user doesn't have enough for gas.
+            //     - User wants to claim/send loot with another wallet.
+            //     - User would prefer claiming from contract.
+
+            availableLootBoxes[_LootBoxID]--;
+            lootBoxVoucher[msg.sender][_LootBoxID]++;
+            return;
+        }
+        */
+
+        availableLootBoxes[_LootBoxID]--;
+
+        if(_erc20_Contract != address(0)){
             if(thisHasThatLoot(_LootBoxID, 20)){
+                uint256 _erc20_LootAmount = LootBoxID[_LootBoxID].erc20.balance;
                 // Send ERC20 tokens to claimer
                 IERC20(_erc20_Contract).transfer(msg.sender, _erc20_LootAmount);
             }
             else{
-                // Send alt ERC20
+                voucher++;
             }
         }
 
-        //❌ ADD OTHER TOKEN TYPES HERE LATER ❌
+        if(_erc721_Contract != address(0) && voucher == 0){
+            if(thisHasThatLoot(_LootBoxID, 721)){
+                uint256[] storage _erc721_LootTokens = LootBoxID[_LootBoxID].erc721.tokenIDs;
+                // Send ERC721 tokens to claimer
+                for (uint256 i = 0; i < _erc721_LootTokens.length; i++) {
+                    IERC721(_erc721_Contract).safeTransferFrom(address(this), msg.sender, _erc721_LootTokens[i]);
+                }
+            }
+            else{
+                voucher++;
+            }
+        }
+
+        if(_erc1155_Contract != address(0) && voucher == 0){
+            if(thisHasThatLoot(_LootBoxID, 1155)){
+                uint256[] storage _erc1155_LootTokens = LootBoxID[_LootBoxID].erc1155.tokenIDs;
+                uint256[] storage _erc1155_LootAmounts = LootBoxID[_LootBoxID].erc1155.balances;
+                // Send ERC1155 tokens to claimer
+                IERC1155(_erc1155_Contract).safeBatchTransferFrom(address(this), msg.sender, _erc1155_LootTokens, _erc1155_LootAmounts,"");
+            }
+            else{
+                voucher++;
+            }
+        }
+
+        if(voucher > 0) {
+            lootBoxVoucher[msg.sender][_LootBoxID]++;
+        }
     }
 
     /**
@@ -222,6 +265,9 @@ contract Loot is Admins {
      */
     function thisHasThatLoot(uint256 _LootBoxID, uint256 _tokenType) public view returns (bool) {
         require(_tokenType == 0 || _tokenType == 20 || _tokenType == 721 || _tokenType == 1155, "Invalid token type.");
+        if(availableLootBoxes[_LootBoxID] <= 0){
+            revert LootAlreadyClaimed(_LootBoxID);
+        }
 
         ERC20Token storage erc20Token = LootBoxID[_LootBoxID].erc20;
         ERC721Token storage erc721Token = LootBoxID[_LootBoxID].erc721;
