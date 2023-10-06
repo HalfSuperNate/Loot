@@ -155,6 +155,14 @@ contract Loot is Admins, ReentrancyGuard {
     }
 
     /**
+     * @dev Allow user to set flag to claim loot later.
+     * @param _claimAllLater Flag to claim loot later.
+     */
+    function setClaimOption(bool _claimAllLater) public {
+        voucherOnly[msg.sender] = _claimAllLater;
+    }
+
+    /**
      * @dev Returns array token data for a ERC721 bundle, or array token or balance data for a ERC1155 bundle.
      * @param _bundleID The bundle ID to check.
      * @param _T721F1155 Flag true if ERC721 or false if ERC1155.
