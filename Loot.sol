@@ -6,13 +6,14 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import "@openzeppelin/contracts/token/ERC1155/IERC1155.sol";
 import "https://github.com/OpenZeppelin/openzeppelin-contracts/blob/master/contracts/utils/cryptography/MerkleProof.sol";
+import "https://github.com/OpenZeppelin/openzeppelin-contracts/blob/master/contracts/utils/ReentrancyGuard.sol";
 
 /// @author developer's website 🐸 https://www.halfsupershop.com/ 🐸
-contract Loot is Admins {
+contract Loot is Admins, ReentrancyGuard {
     
     mapping(uint256 => uint256) public availableLootBoxes;
     mapping(address => mapping(uint256 => uint256)) public lootBoxVoucher;
-    //mapping(address => bool) public voucherOnly;
+    mapping(address => bool) public voucherOnly;
 
     /*Tokens this contract holds*/
     mapping(address => uint256) public erc20ContractBalance;
@@ -56,6 +57,7 @@ contract Loot is Admins {
     event LootBoxCreated(uint256 lootBoxID, address creator);
 
     error LootAlreadyClaimed(uint256 lootBoxID);
+    error LootUnavailable(uint256 lootBoxID);
     /* 
     address(0) = 0x0000000000000000000000000000000000000000
     */
@@ -173,88 +175,115 @@ contract Loot is Admins {
     }
 
     /**
-     * @dev Verify if the Loot can be claimed.
-     * @param proof bytes32 array for proof.
-     * @param _LootID Unique loot ID.
-     * @param _LootBoxID Specified loot box ID.
-     */
-    function verifyClaim(bytes32[] memory proof, uint256 _LootID, uint256 _LootBoxID) public view returns (bool) {
-        if (proof.length != 0 && !LootBoxID[_LootBoxID].claimed) {
-            if (MerkleProof.verify(proof, LootBoxID[_LootBoxID].root, bytes32(_LootID))) {
-                return (true);
-            }
-        }
-        
-        return (false);
-    }
-
-    /**
      * @dev Allows the user an attempt to claim a specified loot box or voucher.
      * @param proof bytes32 array for proof.
      * @param _LootID Unique loot ID.
      * @param _LootBoxID Specified loot box ID.
      * Note: WARNING - Unauthorized attempts may cause user negative effects, NO CHEATING.
      */
-    function tryClaimLoot(bytes32[] memory proof, uint256 _LootID, uint256 _LootBoxID) public {
+    function tryClaimLoot(bytes32[] memory proof, uint256 _LootID, uint256 _LootBoxID, bool claimLater) public nonReentrant {
         require(verifyClaim(proof, _LootID, _LootBoxID), "Cannot claim loot.");
         address _erc20_Contract = LootBoxID[_LootBoxID].erc20.tokenAddress;
         address _erc721_Contract = LootBoxID[_LootBoxID].erc721.tokenAddress;
         address _erc1155_Contract = LootBoxID[_LootBoxID].erc1155.tokenAddress;
-        uint256 voucher;
+        bool _voucher;
 
-        /*
-        if(voucherOnly[msg.sender]){
-            // ❌ ADD FUNCTION IF USER WOULD LIKE TO CLAIM LOOT AT A LATER TIME BY CONSUMING A VOUCHER❌ 
+        // sub from available LootBox quantity
+        availableLootBoxes[_LootBoxID]--;
+
+        if(voucherOnly[msg.sender] || claimLater){
+            // User Wants To Claim Later
             //     - For instance if a user doesn't have enough for gas.
             //     - User wants to claim/send loot with another wallet.
             //     - User would prefer claiming from contract.
-
-            availableLootBoxes[_LootBoxID]--;
+            //     - User forgot or was unaware to pickup the loot box drop.
             lootBoxVoucher[msg.sender][_LootBoxID]++;
             return;
         }
-        */
 
-        availableLootBoxes[_LootBoxID]--;
+        if(_erc20_Contract != address(0) && !_voucher){
+            if(!thisHasThatLoot(_LootBoxID, 20)){
+                _voucher = true;
+            }
+        }
 
-        if(_erc20_Contract != address(0)){
-            if(thisHasThatLoot(_LootBoxID, 20)){
+        if(_erc721_Contract != address(0) && !_voucher){
+            if(!thisHasThatLoot(_LootBoxID, 721)){
+                _voucher = true;
+            }
+        }
+
+        if(_erc1155_Contract != address(0) && !_voucher){
+            if(!thisHasThatLoot(_LootBoxID, 1155)){
+                _voucher = true;
+            }
+        }
+
+        if(_voucher) {
+            // Claim Later
+            lootBoxVoucher[msg.sender][_LootBoxID]++;
+        }
+        else{
+            // Claim Now
+            if(_erc20_Contract != address(0)){
                 uint256 _erc20_LootAmount = LootBoxID[_LootBoxID].erc20.balance;
                 // Send ERC20 tokens to claimer
                 IERC20(_erc20_Contract).transfer(msg.sender, _erc20_LootAmount);
             }
-            else{
-                voucher++;
-            }
-        }
-
-        if(_erc721_Contract != address(0) && voucher == 0){
-            if(thisHasThatLoot(_LootBoxID, 721)){
+            
+            if(_erc721_Contract != address(0)){
                 uint256[] storage _erc721_LootTokens = LootBoxID[_LootBoxID].erc721.tokenIDs;
                 // Send ERC721 tokens to claimer
                 for (uint256 i = 0; i < _erc721_LootTokens.length; i++) {
                     IERC721(_erc721_Contract).safeTransferFrom(address(this), msg.sender, _erc721_LootTokens[i]);
                 }
             }
-            else{
-                voucher++;
-            }
-        }
-
-        if(_erc1155_Contract != address(0) && voucher == 0){
-            if(thisHasThatLoot(_LootBoxID, 1155)){
+            
+            if(_erc1155_Contract != address(0)){
                 uint256[] storage _erc1155_LootTokens = LootBoxID[_LootBoxID].erc1155.tokenIDs;
                 uint256[] storage _erc1155_LootAmounts = LootBoxID[_LootBoxID].erc1155.balances;
                 // Send ERC1155 tokens to claimer
                 IERC1155(_erc1155_Contract).safeBatchTransferFrom(address(this), msg.sender, _erc1155_LootTokens, _erc1155_LootAmounts,"");
             }
-            else{
-                voucher++;
-            }
+        }
+    }
+
+    /**
+     * @dev Allows the user to claim a specified loot box.
+     * @param claimer Address for the wallet that can claim.
+     * @param _LootBoxID Specified loot box ID.
+     * Note: Any wallet can trigger the claim for the claimer address.
+     */
+    function claimLoot(address claimer, uint256 _LootBoxID) public nonReentrant {
+        if(lootBoxVoucher[claimer][_LootBoxID] <= 0 || !thisHasThatLoot(_LootBoxID, 0)){
+            revert LootUnavailable(_LootBoxID);
         }
 
-        if(voucher > 0) {
-            lootBoxVoucher[msg.sender][_LootBoxID]++;
+        lootBoxVoucher[claimer][_LootBoxID]--;
+
+        address _erc20_Contract = LootBoxID[_LootBoxID].erc20.tokenAddress;
+        address _erc721_Contract = LootBoxID[_LootBoxID].erc721.tokenAddress;
+        address _erc1155_Contract = LootBoxID[_LootBoxID].erc1155.tokenAddress;
+
+        if(_erc20_Contract != address(0)){
+            uint256 _erc20_LootAmount = LootBoxID[_LootBoxID].erc20.balance;
+            // Send ERC20 tokens to claimer
+            IERC20(_erc20_Contract).transfer(claimer, _erc20_LootAmount);
+        }
+        
+        if(_erc721_Contract != address(0)){
+            uint256[] storage _erc721_LootTokens = LootBoxID[_LootBoxID].erc721.tokenIDs;
+            // Send ERC721 tokens to claimer
+            for (uint256 i = 0; i < _erc721_LootTokens.length; i++) {
+                IERC721(_erc721_Contract).safeTransferFrom(address(this), claimer, _erc721_LootTokens[i]);
+            }
+        }
+        
+        if(_erc1155_Contract != address(0)){
+            uint256[] storage _erc1155_LootTokens = LootBoxID[_LootBoxID].erc1155.tokenIDs;
+            uint256[] storage _erc1155_LootAmounts = LootBoxID[_LootBoxID].erc1155.balances;
+            // Send ERC1155 tokens to claimer
+            IERC1155(_erc1155_Contract).safeBatchTransferFrom(address(this), claimer, _erc1155_LootTokens, _erc1155_LootAmounts,"");
         }
     }
 
@@ -262,6 +291,7 @@ contract Loot is Admins {
      * @dev Verify if this contract has the Loot for a specified LootBox.
      * @param _LootBoxID Specified loot box ID.
      * @param _tokenType Types are either 20, 721, 1155, or 0 for all three types.
+     * Note: If token address is address(0) it is skipped over and defaults as true.
      */
     function thisHasThatLoot(uint256 _LootBoxID, uint256 _tokenType) public view returns (bool) {
         require(_tokenType == 0 || _tokenType == 20 || _tokenType == 721 || _tokenType == 1155, "Invalid token type.");
@@ -273,11 +303,11 @@ contract Loot is Admins {
         ERC721Token storage erc721Token = LootBoxID[_LootBoxID].erc721;
         ERC1155Token storage erc1155Token = LootBoxID[_LootBoxID].erc1155;
 
-        if ((_tokenType == 0 || _tokenType == 20) && IERC20(erc20Token.tokenAddress).balanceOf(address(this)) < erc20Token.balance) {
+        if (erc20Token.tokenAddress != address(0) && (_tokenType == 0 || _tokenType == 20) && IERC20(erc20Token.tokenAddress).balanceOf(address(this)) < erc20Token.balance) {
             return false;
         }
 
-        if (_tokenType == 0 || _tokenType == 721) {
+        if (erc721Token.tokenAddress != address(0) && _tokenType == 0 || _tokenType == 721) {
             uint256[] storage erc721TokenIDs = erc721Token.tokenIDs;
             uint256 erc721TokenIDsLength = erc721TokenIDs.length;
 
@@ -289,7 +319,7 @@ contract Loot is Admins {
             }
         }
 
-        if (_tokenType == 0 || _tokenType == 1155) {
+        if (erc1155Token.tokenAddress != address(0) && _tokenType == 0 || _tokenType == 1155) {
             uint256[] storage erc1155TokenIDs = erc1155Token.tokenIDs;
             uint256[] storage erc1155Balances = erc1155Token.balances;
             uint256 erc1155TokenIDsLength = erc1155TokenIDs.length;
@@ -310,6 +340,22 @@ contract Loot is Admins {
         }
 
         return true;
+    }
+
+    /**
+     * @dev Verify if the Loot can be claimed.
+     * @param proof bytes32 array for proof.
+     * @param _LootID Unique loot ID.
+     * @param _LootBoxID Specified loot box ID.
+     */
+    function verifyClaim(bytes32[] memory proof, uint256 _LootID, uint256 _LootBoxID) public view returns (bool) {
+        if (proof.length != 0 && !LootBoxID[_LootBoxID].claimed) {
+            if (MerkleProof.verify(proof, LootBoxID[_LootBoxID].root, bytes32(_LootID))) {
+                return (true);
+            }
+        }
+        
+        return (false);
     }
 
     // Initialize empty data for ERC20, ERC721, and ERC1155 tokens then push an empty LootBox
