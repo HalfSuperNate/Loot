@@ -3,7 +3,9 @@ pragma solidity ^0.8.20;
 
 import "./Admins.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC721/utils/ERC721Holder.sol";
 import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
+import "@openzeppelin/contracts/token/ERC1155/utils/ERC1155Holder.sol";
 import "@openzeppelin/contracts/token/ERC1155/IERC1155.sol";
 import "https://github.com/OpenZeppelin/openzeppelin-contracts/blob/master/contracts/utils/cryptography/MerkleProof.sol";
 import "https://github.com/OpenZeppelin/openzeppelin-contracts/blob/master/contracts/utils/ReentrancyGuard.sol";
@@ -14,11 +16,6 @@ contract Loot is Admins, ReentrancyGuard {
     mapping(uint256 => uint256) public availableLootBoxes;
     mapping(address => mapping(uint256 => uint256)) public lootBoxVoucher;
     mapping(address => bool) public voucherOnly;
-
-    /*Tokens this contract holds*/
-    mapping(address => uint256) public erc20ContractBalance;
-    mapping(address => mapping(uint256 => bool)) public erc721ContractToken;
-    mapping(address => mapping(uint256 => uint256)) public erc1155ContractBalance;
 
     // Struct to represent ERC20 token and its balance
     struct ERC20Token {
@@ -66,6 +63,69 @@ contract Loot is Admins, ReentrancyGuard {
         initTokenBundles();
     }
 
+    // ❌ Add Admin Function To Create Optional Bundles If Tokens Are Sent To This Contract By Other Users ❌
+
+    /**
+     * @dev Function to add ERC20 token(s) to the bundle array.
+     * @param _from The address the ERC20 tokens are coming from.
+     * @param _tokenAddress The contract of the ERC20 tokens.
+     * @param _amount The amount (in WEI) of ERC20 tokens for this bundle.
+     */
+    function addERC20Token(address _from, address _tokenAddress, uint256 _amount) public onlyAdmins {
+        require(_amount > 0, "Amount must be greater than zero");
+        IERC20(_tokenAddress).transferFrom(_from, address(this), _amount);
+
+        // Create a new ERC20Token instance
+        ERC20Token memory newToken = ERC20Token({
+            tokenAddress: _tokenAddress,
+            balance: _amount
+        });
+
+        // Add the new bundle to the array
+        ERC20BundleID.push(newToken);
+    }
+
+    /**
+     * @dev Function to add ERC721 token(s) to the bundle array.
+     * @param _from The address the ERC721 tokens are coming from.
+     * @param _tokenAddress The contract of the ERC721 tokens.
+     * @param _tokenIDs The token IDs for this bundle.
+     */
+    function addERC721Token(address _from, address _tokenAddress, uint256[] calldata _tokenIDs) public onlyAdmins {
+        for (uint256 i = 0; i < _tokenIDs.length; i++) {
+            IERC721(_tokenAddress).transferFrom(_from, address(this), _tokenIDs[i]);
+        }
+        
+        // Create a new ERC721Token instance
+        ERC721Token memory newToken = ERC721Token({
+            tokenAddress: _tokenAddress,
+            tokenIDs: _tokenIDs
+        });
+
+        ERC721BundleID.push(newToken);
+    }
+
+    /**
+     * @dev Function to add ERC1155 token(s) to the bundle array.
+     * @param _from The address the ERC1155 tokens are coming from.
+     * @param _tokenAddress The contract of the ERC1155 tokens.
+     * @param _tokenIDs The token IDs for this bundle.
+     * @param _amounts The amount of each ID for this bundle.
+     */
+    function addERC1155Token(address _from, address _tokenAddress, uint256[] calldata _tokenIDs, uint256[] calldata _amounts) public onlyAdmins {
+        IERC1155(_tokenAddress).safeBatchTransferFrom(_from, address(this), _tokenIDs, _amounts, "");
+        
+        // Create a new ERC1155Token instance
+        ERC1155Token memory newToken = ERC1155Token({
+            tokenAddress: _tokenAddress,
+            tokenIDs: _tokenIDs,
+            balances: _amounts
+        });
+
+        // Add the new bundle to the array
+        ERC1155BundleID.push(newToken);
+    }
+
     /**
      * @dev Function to create a Loot Box.
      * @param _ERC20BundleID ID of the ERC20 bundle.
@@ -106,80 +166,11 @@ contract Loot is Admins, ReentrancyGuard {
     }
 
     /**
-     * @dev Function to add ERC20 token(s) to the bundle array.
-     * @param _tokenAddress The contract of the ERC20 tokens.
-     * @param _balance The amount (in WEI) of ERC20 tokens for this bundle.
-     */
-    function addERC20Token(address _tokenAddress, uint256 _balance) public onlyAdmins {
-        // Create a new ERC20Token instance
-        ERC20Token memory newToken = ERC20Token({
-            tokenAddress: _tokenAddress,
-            balance: _balance
-        });
-
-        // Add the new bundle to the array
-        ERC20BundleID.push(newToken);
-    }
-
-    /**
-     * @dev Function to add ERC721 token(s) to the bundle array.
-     * @param _tokenAddress The contract of the ERC721 tokens.
-     * @param _tokenIDs The token IDs for this bundle.
-     */
-    function addERC721Token(address _tokenAddress, uint256[] calldata _tokenIDs) public onlyAdmins {
-        // Create a new ERC721Token instance
-        ERC721Token memory newToken = ERC721Token({
-            tokenAddress: _tokenAddress,
-            tokenIDs: _tokenIDs
-        });
-
-        ERC721BundleID.push(newToken);
-    }
-
-    /**
-     * @dev Function to add ERC1155 token(s) to the bundle array.
-     * @param _tokenAddress The contract of the ERC1155 tokens.
-     * @param _tokenIDs The token IDs for this bundle.
-     * @param _balances The amount of each ID for this bundle.
-     */
-    function addERC1155Token(address _tokenAddress, uint256[] calldata _tokenIDs, uint256[] calldata _balances) public onlyAdmins {
-        // Create a new ERC1155Token instance
-        ERC1155Token memory newToken = ERC1155Token({
-            tokenAddress: _tokenAddress,
-            tokenIDs: _tokenIDs,
-            balances: _balances
-        });
-
-        // Add the new bundle to the array
-        ERC1155BundleID.push(newToken);
-    }
-
-    /**
      * @dev Allow user to set flag to claim loot later.
      * @param _claimAllLater Flag to claim loot later.
      */
     function setClaimOption(bool _claimAllLater) public {
         voucherOnly[msg.sender] = _claimAllLater;
-    }
-
-    /**
-     * @dev Returns array token data for a ERC721 bundle, or array token or balance data for a ERC1155 bundle.
-     * @param _bundleID The bundle ID to check.
-     * @param _T721F1155 Flag true if ERC721 or false if ERC1155.
-     * @param _TidFamount Flag true for ERC1155 token IDs or false for ERC1155 amounts for each token ID.
-     */
-    function getBundleArrayData(uint256 _bundleID, bool _T721F1155, bool _TidFamount) public view returns (uint256[] memory) {
-        if(_T721F1155){
-            return ERC721BundleID[_bundleID].tokenIDs;
-        }
-        else{
-            if(_TidFamount){
-                return ERC1155BundleID[_bundleID].tokenIDs;
-            }
-            else{
-                return ERC1155BundleID[_bundleID].balances;
-            }
-        }
     }
 
     /**
@@ -311,33 +302,28 @@ contract Loot is Admins, ReentrancyGuard {
         ERC721Token storage erc721Token = LootBoxID[_LootBoxID].erc721;
         ERC1155Token storage erc1155Token = LootBoxID[_LootBoxID].erc1155;
 
-        if (erc20Token.tokenAddress != address(0) && (_tokenType == 0 || _tokenType == 20) && IERC20(erc20Token.tokenAddress).balanceOf(address(this)) < erc20Token.balance) {
+        if ((_tokenType == 0 || _tokenType == 20) && erc20Token.tokenAddress != address(0) && erc20BalanceOf(erc20Token.tokenAddress, address(this)) < erc20Token.balance) {
             return false;
         }
 
-        if (erc721Token.tokenAddress != address(0) && _tokenType == 0 || _tokenType == 721) {
+        if ((_tokenType == 0 || _tokenType == 721) && erc721Token.tokenAddress != address(0)) {
             uint256[] storage erc721TokenIDs = erc721Token.tokenIDs;
             uint256 erc721TokenIDsLength = erc721TokenIDs.length;
 
             for (uint256 i = 0; i < erc721TokenIDsLength; i++) {
                 uint256 _tokenID = erc721TokenIDs[i];
-                if (IERC721(erc721Token.tokenAddress).ownerOf(_tokenID) != address(this)) {
+                if (erc721OwnerOf(erc721Token.tokenAddress, _tokenID, address(this)) < 1) {
                     return false;
                 }
             }
         }
 
-        if (erc1155Token.tokenAddress != address(0) && _tokenType == 0 || _tokenType == 1155) {
+        if ((_tokenType == 0 || _tokenType == 1155) && erc1155Token.tokenAddress != address(0)) {
             uint256[] storage erc1155TokenIDs = erc1155Token.tokenIDs;
             uint256[] storage erc1155Balances = erc1155Token.balances;
             uint256 erc1155TokenIDsLength = erc1155TokenIDs.length;
 
-            address[] memory accountsArray = new address[](erc1155TokenIDsLength);
-            for (uint256 j = 0; j < erc1155TokenIDsLength; j++) {
-                accountsArray[j] = address(this);
-            }
-
-            uint256[] memory _balances = IERC1155(erc1155Token.tokenAddress).balanceOfBatch(accountsArray, erc1155TokenIDs);
+            uint256[] memory _balances = erc1155BalanceOfBatch(erc1155Token.tokenAddress, erc1155TokenIDs, repeatAddressArray(address(this), erc1155TokenIDsLength), false);
 
             for (uint256 i = 0; i < erc1155TokenIDsLength; i++) {
                 uint256 _tokenAmount = erc1155Balances[i];
@@ -346,8 +332,89 @@ contract Loot is Admins, ReentrancyGuard {
                 }
             }
         }
-
         return true;
+    }
+
+    /**
+     * @dev Returns the ERC20 token balance of an address.
+     * @param _tokenAddress ERC20 token address.
+     * @param _checkAddress Address to check the balance of.
+     */
+    function erc20BalanceOf(address _tokenAddress, address _checkAddress) public view returns (uint256) {
+        return IERC20(_tokenAddress).balanceOf(_checkAddress);
+    }
+
+    /**
+     * @dev Returns the ERC721 token balance of an address.
+     * @param _tokenAddress ERC721 token address.
+     * @param _tokenID Token ID to check.
+     * @param _checkAddress Address to check the balance of the specified token ID.
+     * Note: If 0 is returned the check address doesn't own the token ID.
+     */
+    function erc721OwnerOf(address _tokenAddress, uint256 _tokenID, address _checkAddress) public view returns (uint256) {
+        if (IERC721(_tokenAddress).ownerOf(_tokenID) == _checkAddress) {
+            return 1;
+        }
+        return 0;
+    }
+
+    /**
+     * @dev Returns the ERC1155 token balance of an address.
+     * @param _tokenAddress ERC1155 token address.
+     * @param _tokenID Token ID to check.
+     * @param _checkAddress Address to check the balance of the specified token ID.
+     * Note: If 0 is returned the check address doesn't own the token ID.
+     */
+    function erc1155BalanceOf(address _tokenAddress, uint256 _tokenID, address _checkAddress) public view returns (uint256) {
+        return IERC1155(_tokenAddress).balanceOf(_checkAddress, _tokenID);
+    }
+
+    /**
+     * @dev Returns the ERC1155 token balance of an address.
+     * @param _tokenAddress ERC1155 token address.
+     * @param _tokenIDs Token ID to check.
+     * @param _checkAddresses Addresses to check the balance of the specified token ID.
+     * @param _use1stAddressOnly Flag if using only the first address in _checkAddresses.
+     * Note: Returns the balances of each tokenID, if 0 is returned the check address doesn't own the token ID of that index.
+     */
+    function erc1155BalanceOfBatch(address _tokenAddress, uint256[] memory _tokenIDs, address[] memory _checkAddresses, bool _use1stAddressOnly) public view returns (uint256[] memory) {
+        if(_use1stAddressOnly) {
+            return IERC1155(_tokenAddress).balanceOfBatch(repeatAddressArray(_checkAddresses[0], _tokenIDs.length), _tokenIDs);
+        }
+        return IERC1155(_tokenAddress).balanceOfBatch(_checkAddresses, _tokenIDs);
+    }
+
+    /**
+     * @dev Returns array token data for a ERC721 bundle, or array token or balance data for a ERC1155 bundle.
+     * @param _bundleID The bundle ID to check.
+     * @param _T721F1155 Flag true if ERC721 or false if ERC1155.
+     * @param _TidFamount Flag true for ERC1155 token IDs or false for ERC1155 amounts for each token ID.
+     */
+    function getBundleArrayData(uint256 _bundleID, bool _T721F1155, bool _TidFamount) public view returns (uint256[] memory) {
+        if(_T721F1155){
+            return ERC721BundleID[_bundleID].tokenIDs;
+        }
+        else{
+            if(_TidFamount){
+                return ERC1155BundleID[_bundleID].tokenIDs;
+            }
+            else{
+                return ERC1155BundleID[_bundleID].balances;
+            }
+        }
+    }
+
+    /**
+     * @dev Returns the address as an array with the specified length.
+     * @param _address Address to repeat.
+     * @param _length Length of the array to repeat the address.
+     */
+    function repeatAddressArray(address _address, uint256 _length) public pure returns (address[] memory) {
+        address[] memory addressArray = new address[](_length);
+        for (uint256 i = 0; i < _length; i++) {
+            addressArray[i] = _address;
+        }
+        return addressArray;
     }
 
     /**
@@ -362,7 +429,6 @@ contract Loot is Admins, ReentrancyGuard {
                 return (true);
             }
         }
-        
         return (false);
     }
 
