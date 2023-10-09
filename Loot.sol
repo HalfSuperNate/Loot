@@ -64,6 +64,7 @@ contract Loot is Admins, ReentrancyGuard {
     }
 
     // ❌ Add Admin Function To Create Optional Bundles If Tokens Are Sent To This Contract By Other Users ❌
+    // ❌ Add Optional Function To Merge Similar Loot Into A Single Box For Single Transaction Costs By Other Users ❌
 
     /**
      * @dev Function to add ERC20 token(s) to the bundle array.
@@ -182,68 +183,32 @@ contract Loot is Admins, ReentrancyGuard {
      */
     function tryClaimLoot(bytes32[] memory proof, uint256 _LootID, uint256 _LootBoxID, bool claimLater) public nonReentrant {
         require(verifyClaim(proof, _LootID, _LootBoxID), "Cannot claim loot.");
-        address _erc20_Contract = LootBoxID[_LootBoxID].erc20.tokenAddress;
-        address _erc721_Contract = LootBoxID[_LootBoxID].erc721.tokenAddress;
-        address _erc1155_Contract = LootBoxID[_LootBoxID].erc1155.tokenAddress;
+        if(availableLootBoxes[_LootBoxID] <= 0){
+            revert LootAlreadyClaimed(_LootBoxID);
+        }
+        
         bool _voucher;
+        // does contract hold all the tokens in the given loot box
+        if(!thisHasThatLoot(_LootBoxID, 0)){
+            _voucher = true;
+        }
 
         // sub from available LootBox quantity
         availableLootBoxes[_LootBoxID]--;
 
-        if(voucherOnly[msg.sender] || claimLater){
-            // User Wants To Claim Later
+        if(voucherOnly[msg.sender] || claimLater || _voucher) {
+            // Claim Later voucher assigned for claimer
             //     - For instance if a user doesn't have enough for gas.
             //     - User wants to claim/send loot with another wallet.
             //     - User would prefer claiming from contract.
             //     - User forgot or was unaware to pickup the loot box drop.
+            //     - Contract does not hold the loot for the loot box yet.
             lootBoxVoucher[msg.sender][_LootBoxID]++;
             return;
         }
-
-        if(_erc20_Contract != address(0) && !_voucher){
-            if(!thisHasThatLoot(_LootBoxID, 20)){
-                _voucher = true;
-            }
-        }
-
-        if(_erc721_Contract != address(0) && !_voucher){
-            if(!thisHasThatLoot(_LootBoxID, 721)){
-                _voucher = true;
-            }
-        }
-
-        if(_erc1155_Contract != address(0) && !_voucher){
-            if(!thisHasThatLoot(_LootBoxID, 1155)){
-                _voucher = true;
-            }
-        }
-
-        if(_voucher) {
-            // Claim Later
-            lootBoxVoucher[msg.sender][_LootBoxID]++;
-        }
         else{
             // Claim Now
-            if(_erc20_Contract != address(0)){
-                uint256 _erc20_LootAmount = LootBoxID[_LootBoxID].erc20.balance;
-                // Send ERC20 tokens to claimer
-                IERC20(_erc20_Contract).transfer(msg.sender, _erc20_LootAmount);
-            }
-            
-            if(_erc721_Contract != address(0)){
-                uint256[] storage _erc721_LootTokens = LootBoxID[_LootBoxID].erc721.tokenIDs;
-                // Send ERC721 tokens to claimer
-                for (uint256 i = 0; i < _erc721_LootTokens.length; i++) {
-                    IERC721(_erc721_Contract).safeTransferFrom(address(this), msg.sender, _erc721_LootTokens[i]);
-                }
-            }
-            
-            if(_erc1155_Contract != address(0)){
-                uint256[] storage _erc1155_LootTokens = LootBoxID[_LootBoxID].erc1155.tokenIDs;
-                uint256[] storage _erc1155_LootAmounts = LootBoxID[_LootBoxID].erc1155.balances;
-                // Send ERC1155 tokens to claimer
-                IERC1155(_erc1155_Contract).safeBatchTransferFrom(address(this), msg.sender, _erc1155_LootTokens, _erc1155_LootAmounts,"");
-            }
+            iClaim(msg.sender, _LootBoxID);
         }
     }
 
@@ -260,9 +225,17 @@ contract Loot is Admins, ReentrancyGuard {
 
         lootBoxVoucher[claimer][_LootBoxID]--;
 
+        iClaim(claimer, _LootBoxID);
+    }
+
+    function iClaim(address claimer, uint256 _LootBoxID) internal nonReentrant {
         address _erc20_Contract = LootBoxID[_LootBoxID].erc20.tokenAddress;
         address _erc721_Contract = LootBoxID[_LootBoxID].erc721.tokenAddress;
         address _erc1155_Contract = LootBoxID[_LootBoxID].erc1155.tokenAddress;
+
+        if(availableLootBoxes[_LootBoxID] == 0){
+            LootBoxID[_LootBoxID].claimed = true;
+        }
 
         if(_erc20_Contract != address(0)){
             uint256 _erc20_LootAmount = LootBoxID[_LootBoxID].erc20.balance;
@@ -294,9 +267,6 @@ contract Loot is Admins, ReentrancyGuard {
      */
     function thisHasThatLoot(uint256 _LootBoxID, uint256 _tokenType) public view returns (bool) {
         require(_tokenType == 0 || _tokenType == 20 || _tokenType == 721 || _tokenType == 1155, "Invalid token type.");
-        if(availableLootBoxes[_LootBoxID] <= 0){
-            revert LootAlreadyClaimed(_LootBoxID);
-        }
 
         ERC20Token storage erc20Token = LootBoxID[_LootBoxID].erc20;
         ERC721Token storage erc721Token = LootBoxID[_LootBoxID].erc721;
