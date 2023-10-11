@@ -16,6 +16,7 @@ contract Loot is Admins, ReentrancyGuard {
     mapping(uint256 => uint256) public availableLootBoxes;
     mapping(address => mapping(uint256 => uint256)) public lootBoxVoucher;
     mapping(address => bool) public voucherOnly;
+    mapping(address => bool) public allowableLoot;
 
     // Struct to represent ERC20 token and its balance
     struct ERC20Token {
@@ -63,8 +64,50 @@ contract Loot is Admins, ReentrancyGuard {
         initTokenBundles();
     }
 
-    // ❌ Add Admin Function To Create Optional Bundles If Tokens Are Sent To This Contract By Other Users ❌
     // ❌ Add Optional Function To Merge Similar Loot Into A Single Box For Single Transaction Costs By Other Users ❌
+
+    /**
+     * @dev Allow admins to set the allow flag for token contract.
+     * @param _tokenAddress The token contract address.
+     * @param _allow Flag to allow token contract.
+     */
+    function setAllowedContract(address _tokenAddress, bool _allow) public onlyAdmins {
+        allowableLoot[_tokenAddress] = _allow;
+    }
+
+    /**
+     * @dev Allow user to set flag to claim loot later.
+     * @param _claimAllLater Flag to claim loot later.
+     */
+    function setClaimOption(bool _claimAllLater) public {
+        voucherOnly[msg.sender] = _claimAllLater;
+    }
+
+    /**
+     * @dev Allow admins to set an operator for specific token address.
+     * @param _tokenType Types are either 20, 721, or 1155.
+     * @param _tokenAddress The token contract address.
+     * @param _operator The operator's address.
+     * @param _approved Flag to allow or revoke operator permission.
+     * @param _erc20AllowAmount Amount of ERC20 tokens allowed.
+     * Note: An approved operator will only be able to move the tokens within this contract.
+     */
+    function setApproval(uint256 _tokenType, address _tokenAddress, address _operator, bool _approved, uint256 _erc20AllowAmount) public onlyAdmins {
+        require(_tokenType == 20 || _tokenType == 721 || _tokenType == 1155, "Invalid token type.");
+
+        if (_tokenType == 20) {
+            require(_erc20AllowAmount <= IERC20(_tokenAddress).balanceOf(address(this)), "Insufficient contract balance");
+            IERC20(_tokenAddress).approve(_operator, _erc20AllowAmount);
+        }
+
+        if (_tokenType == 721) {
+            IERC721(_tokenAddress).setApprovalForAll(_operator, _approved);
+        }
+
+        if (_tokenType == 1155) {
+            IERC1155(_tokenAddress).setApprovalForAll(_operator, _approved);
+        }
+    }
 
     /**
      * @dev Function to add ERC20 token(s) to the bundle array.
@@ -74,6 +117,7 @@ contract Loot is Admins, ReentrancyGuard {
      */
     function addERC20Token(address _from, address _tokenAddress, uint256 _amount) public onlyAdmins {
         require(_amount > 0, "Amount must be greater than zero");
+        require(allowableLoot[_tokenAddress], "Token Address Not Allowed");
         IERC20(_tokenAddress).transferFrom(_from, address(this), _amount);
 
         // Create a new ERC20Token instance
@@ -93,6 +137,8 @@ contract Loot is Admins, ReentrancyGuard {
      * @param _tokenIDs The token IDs for this bundle.
      */
     function addERC721Token(address _from, address _tokenAddress, uint256[] calldata _tokenIDs) public onlyAdmins {
+        require(_tokenIDs.length > 0, "Must have token IDs");
+        require(allowableLoot[_tokenAddress], "Token Address Not Allowed");
         for (uint256 i = 0; i < _tokenIDs.length; i++) {
             IERC721(_tokenAddress).transferFrom(_from, address(this), _tokenIDs[i]);
         }
@@ -114,6 +160,8 @@ contract Loot is Admins, ReentrancyGuard {
      * @param _amounts The amount of each ID for this bundle.
      */
     function addERC1155Token(address _from, address _tokenAddress, uint256[] calldata _tokenIDs, uint256[] calldata _amounts) public onlyAdmins {
+        require(_tokenIDs.length > 0, "Must have token IDs");
+        require(allowableLoot[_tokenAddress], "Token Address Not Allowed");
         IERC1155(_tokenAddress).safeBatchTransferFrom(_from, address(this), _tokenIDs, _amounts, "");
         
         // Create a new ERC1155Token instance
@@ -164,14 +212,6 @@ contract Loot is Admins, ReentrancyGuard {
         emit LootBoxCreated(newLootBoxID, msg.sender);
         
         return newLootBoxID;
-    }
-
-    /**
-     * @dev Allow user to set flag to claim loot later.
-     * @param _claimAllLater Flag to claim loot later.
-     */
-    function setClaimOption(bool _claimAllLater) public {
-        voucherOnly[msg.sender] = _claimAllLater;
     }
 
     /**
