@@ -65,6 +65,9 @@ contract Loot is Admins, ReentrancyGuard {
     }
 
     // ❌ Add Optional Function To Merge Similar Loot Into A Single Box For Single Transaction Costs By Other Users ❌
+    // ⭕️   Considering utilizing ERC-6551 and 
+    //      minting ERC-721 tokens as the Loot Boxes if it contains multiple collections & or token types
+    //      so all loot can be moved in one single transaction ⭕️
 
     /**
      * @dev Allow admins to set the allow flag for token contract.
