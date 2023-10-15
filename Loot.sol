@@ -13,7 +13,6 @@ import "https://github.com/OpenZeppelin/openzeppelin-contracts/blob/master/contr
 /// @author developer's website 🐸 https://www.halfsupershop.com/ 🐸
 contract Loot is Admins, ReentrancyGuard {
     
-    uint256 public currentContest;
     mapping(uint256 => bytes32) public contestID;
     mapping(uint256 => uint256) public availableLootBoxes;
     mapping(address => mapping(uint256 => uint256)) public lootBoxVoucher;
@@ -70,6 +69,15 @@ contract Loot is Admins, ReentrancyGuard {
     // ⭕️   Utilize ERC-6551:
     //      No change needed to current implementation here in this contract,
     //      a Loot Box ERC-721 token contract can be minted to hold multiple token types in one token as a TBA.    ⭕️
+
+    /**
+     * @dev Allow admins to set contest root.
+     * @param _contestID The contest to edit root.
+     * @param _root Root for contest.
+     */
+    function setContest(uint256 _contestID, bytes32 _root) public onlyAdmins {
+        contestID[_contestID] = _root;
+    }
 
     /**
      * @dev Allow admins to set the allow flag for token contract.
