@@ -13,6 +13,8 @@ import "https://github.com/OpenZeppelin/openzeppelin-contracts/blob/master/contr
 /// @author developer's website 🐸 https://www.halfsupershop.com/ 🐸
 contract Loot is Admins, ReentrancyGuard {
     
+    uint256 public currentContest;
+    mapping(uint256 => bytes32) public contestID;
     mapping(uint256 => uint256) public availableLootBoxes;
     mapping(address => mapping(uint256 => uint256)) public lootBoxVoucher;
     mapping(address => bool) public voucherOnly;
@@ -219,13 +221,19 @@ contract Loot is Admins, ReentrancyGuard {
 
     /**
      * @dev Allows the user an attempt to claim a specified loot box or voucher.
-     * @param proof bytes32 array for proof.
+     * @param proofLoot bytes32 array for proof of loot.
+     * @param proofPlayer bytes32 array for proof of player.
      * @param _LootID Unique loot ID.
      * @param _LootBoxID Specified loot box ID.
      * Note: WARNING - Unauthorized attempts may cause user negative effects, NO CHEATING.
      */
-    function tryClaimLoot(bytes32[] memory proof, uint256 _LootID, uint256 _LootBoxID, bool claimLater) public nonReentrant {
-        require(verifyClaim(proof, _LootID, _LootBoxID), "Cannot claim loot.");
+    function tryClaimLoot(bytes32[] memory proofLoot, bytes32[] memory proofPlayer, uint256 _LootID, uint256 _LootBoxID, bool claimLater) public nonReentrant {
+        require(verifyClaim(proofLoot, _LootID, _LootBoxID), "Cannot claim loot.");
+
+        if(contestID[_LootID] != bytes32(0)){
+            require(verifyPlayer(proofPlayer, _LootID, msg.sender), "Not entered in contest.");
+        }
+
         if(availableLootBoxes[_LootBoxID] <= 0){
             revert LootAlreadyClaimed(_LootBoxID);
         }
@@ -272,6 +280,7 @@ contract Loot is Admins, ReentrancyGuard {
     }
 
     function iClaim(address claimer, uint256 _LootBoxID) internal nonReentrant {
+        //❌ ADD REQUIREMENTS FUNCTION TO OPEN LOOT BOX ❌
         address _erc20_Contract = LootBoxID[_LootBoxID].erc20.tokenAddress;
         address _erc721_Contract = LootBoxID[_LootBoxID].erc721.tokenAddress;
         address _erc1155_Contract = LootBoxID[_LootBoxID].erc1155.tokenAddress;
@@ -439,6 +448,21 @@ contract Loot is Admins, ReentrancyGuard {
     function verifyClaim(bytes32[] memory proof, uint256 _LootID, uint256 _LootBoxID) public view returns (bool) {
         if (proof.length != 0 && !LootBoxID[_LootBoxID].claimed) {
             if (MerkleProof.verify(proof, LootBoxID[_LootBoxID].root, bytes32(_LootID))) {
+                return (true);
+            }
+        }
+        return (false);
+    }
+
+    /**
+     * @dev Verify if user is a contestant.
+     * @param proof bytes32 array for proof.
+     * @param _contestID Contest ID to get root.
+     * @param _player Player to check.
+     */
+    function verifyPlayer(bytes32[] memory proof, uint256 _contestID, address _player) public view returns (bool) {
+        if (proof.length != 0) {
+            if (MerkleProof.verify(proof, contestID[_contestID], keccak256(abi.encodePacked(_player)))) {
                 return (true);
             }
         }
