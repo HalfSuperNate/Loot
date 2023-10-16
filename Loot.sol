@@ -243,7 +243,7 @@ contract Loot is Admins, ReentrancyGuard {
      * Note: WARNING - Unauthorized attempts may cause user negative effects, NO CHEATING.
      */
     function tryClaimLoot(bytes32[] memory proofLoot, bytes32[] memory proofPlayer, uint256 _LootID, uint256 _LootBoxID, bool claimLater) public nonReentrant {
-        require(!LootBoxID[_LootBoxID].claimed || verifyClaim(proofLoot, _LootID, _LootBoxID), "Cannot claim loot.");
+        require(verifyClaim(proofLoot, _LootID, _LootBoxID), "Cannot claim loot.");
 
         if(contestID[_LootID] != bytes32(0)){
             require(verifyPlayer(proofPlayer, _LootID, msg.sender), "Not entered in contest.");
