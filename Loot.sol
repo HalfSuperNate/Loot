@@ -18,6 +18,8 @@ contract Loot is Admins, ReentrancyGuard {
     mapping(address => mapping(uint256 => uint256)) public lootBoxVoucher;
     mapping(address => bool) public voucherOnly;
     mapping(address => bool) public allowableLoot;
+    mapping(address => uint256) public timeout;
+    uint256 public timeoutTime;
 
     // Struct to represent ERC20 token and its balance
     struct ERC20Token {
@@ -59,6 +61,7 @@ contract Loot is Admins, ReentrancyGuard {
     error LootUnavailable(uint256 lootBoxID);
     /* 
     address(0) = 0x0000000000000000000000000000000000000000
+    1 day = 86400 seconds
     */
 
     constructor() Admins(msg.sender) {
@@ -70,13 +73,37 @@ contract Loot is Admins, ReentrancyGuard {
     //      No change needed to current implementation here in this contract,
     //      a Loot Box ERC-721 token contract can be minted to hold multiple token types in one token as a TBA.    ⭕️
 
+    // SEE ❌'s BELOW FOR TODOs
+
     /**
-     * @dev Allow admins to set contest root.
-     * @param _contestID The contest to edit root.
-     * @param _root Root for contest.
+     * @dev Allow admins to set LootBox or contest root.
+     * @param _TlootFcontest Flag true for LootBoxID or F for contestID.
+     * @param _ID The ID of the LootBox or contest to edit.
+     * @param _root Root to set.
      */
-    function setContest(uint256 _contestID, bytes32 _root) public onlyAdmins {
-        contestID[_contestID] = _root;
+    function setRoot(bool _TlootFcontest, uint256 _ID, bytes32 _root) public onlyAdmins {
+        if(_TlootFcontest){
+            require(_ID < LootBoxID.length, "Invalid LootBoxID");
+            LootBoxID[_ID].root = _root;
+        }
+        else{
+            contestID[_ID] = _root;
+        }
+    }
+
+    /**
+     * @dev Allow admins to edit the time for a timed-out user or adjust timeoutTime.
+     * @param _user The user address to edit timeout time.
+     * @param _time The time in seconds to set.
+     * Note: If _user is this or zero address set the timeoutTime to _time.
+     */
+    function setTimeoutTime(address _user, uint256 _time) public onlyAdmins {
+        if(_user != address(this) && _user != address(0)){
+            timeout[_user] = block.timestamp + _time;
+            return;
+        }
+        
+        timeoutTime = _time;
     }
 
     /**
@@ -244,6 +271,7 @@ contract Loot is Admins, ReentrancyGuard {
      */
     function tryClaimLoot(bytes32[] memory proofLoot, bytes32[] memory proofPlayer, uint256 _LootID, uint256 _LootBoxID, bool claimLater) public nonReentrant {
         require(verifyClaim(proofLoot, _LootID, _LootBoxID), "Cannot claim loot.");
+        // ❌ SET USER WITH TIMEOUT ADDING timeoutTime IF UNAUTHORIZED ATTEMPT ❌
 
         if(contestID[_LootID] != bytes32(0)){
             require(verifyPlayer(proofPlayer, _LootID, msg.sender), "Not entered in contest.");
