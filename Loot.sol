@@ -49,8 +49,20 @@ contract Loot is Admins, ReentrancyGuard {
         bool claimed;
     }
 
-    /*The ID of Each Loot Box and Token Bundle*/
+    struct LootKey {
+        // if a key is not consumed it will only check if the user holds those key tokens
+        ERC20Token erc20;
+        uint256 consumesERC20;
+        ERC721Token erc721;
+        uint256 consumesERC721;
+        ERC1155Token erc1155;
+        uint256 consumesERC1155;
+    }
+
+    /*The ID of Each Loot Box, Key, and Token Bundle*/
     LootBox[] public LootBoxID;
+    LootKey[] public LootBoxKeyID;
+    mapping(uint256 => uint256) LootBoxKey; //use LootBoxID to get the LootBoxKeyID
     ERC20Token[] public ERC20BundleID;
     ERC721Token[] public ERC721BundleID;
     ERC1155Token[] public ERC1155BundleID;
@@ -74,6 +86,7 @@ contract Loot is Admins, ReentrancyGuard {
     //      a Loot Box ERC-721 token contract can be minted to hold multiple token types in one token as a TBA.    ⭕️
 
     // SEE ❌'s BELOW FOR TODOs
+    //❌ NEED TO SHRINK DOWN BYTES SIZE LIMIT ❌
 
     /**
      * @dev Allow admins to set LootBox or contest root.
@@ -150,40 +163,55 @@ contract Loot is Admins, ReentrancyGuard {
     }
 
     /**
-     * @dev Function to add ERC20 token(s) to the bundle array.
+     * @dev Function to add ERC20 token(s) to the bundle array & deposit tokens into this contract.
      * @param _from The address the ERC20 tokens are coming from.
      * @param _tokenAddress The contract of the ERC20 tokens.
      * @param _amount The amount (in WEI) of ERC20 tokens for this bundle.
      * @param _bundleQty The amount of times to multiply the bundle.
      */
     function addERC20Token(address _from, address _tokenAddress, uint256 _amount, uint256 _bundleQty) public onlyAdmins {
-        require(_amount > 0, "Amount must be greater than zero");
         require(allowableLoot[_tokenAddress], "Token Address Not Allowed");
+        createERC20Bundle(_tokenAddress, _amount);
         IERC20(_tokenAddress).transferFrom(_from, address(this), (_amount * _bundleQty));
+    }
 
+    /**
+     * @dev Function to add ERC20 token(s) to the bundle array.
+     * @param _tokenAddress The contract of the ERC20 tokens.
+     * @param _amount The amount (in WEI) of ERC20 tokens for this bundle.
+     */
+    function createERC20Bundle(address _tokenAddress, uint256 _amount) public onlyAdmins {
+        require(_amount > 0, "Amount must be greater than zero");
         // Create a new ERC20Token instance
         ERC20Token memory newToken = ERC20Token({
             tokenAddress: _tokenAddress,
             balance: _amount
         });
 
-        // Add the new bundle to the array
         ERC20BundleID.push(newToken);
     }
 
     /**
-     * @dev Function to add ERC721 token(s) to the bundle array.
+     * @dev Function to add ERC721 token(s) to the bundle array & deposit tokens into this contract.
      * @param _from The address the ERC721 tokens are coming from.
      * @param _tokenAddress The contract of the ERC721 tokens.
      * @param _tokenIDs The token IDs for this bundle.
      */
     function addERC721Token(address _from, address _tokenAddress, uint256[] calldata _tokenIDs) public onlyAdmins {
-        require(_tokenIDs.length > 0, "Must have token IDs");
         require(allowableLoot[_tokenAddress], "Token Address Not Allowed");
+        createERC721Bundle(_tokenAddress, _tokenIDs);
         for (uint256 i = 0; i < _tokenIDs.length; i++) {
             IERC721(_tokenAddress).transferFrom(_from, address(this), _tokenIDs[i]);
         }
-        
+    }
+
+    /**
+     * @dev Function to add ERC721 token(s) to the bundle array.
+     * @param _tokenAddress The contract of the ERC721 tokens.
+     * @param _tokenIDs The token IDs for this bundle.
+     */
+    function createERC721Bundle(address _tokenAddress, uint256[] calldata _tokenIDs) public onlyAdmins {
+        require(_tokenIDs.length > 0, "Must have token IDs");
         // Create a new ERC721Token instance
         ERC721Token memory newToken = ERC721Token({
             tokenAddress: _tokenAddress,
@@ -194,7 +222,7 @@ contract Loot is Admins, ReentrancyGuard {
     }
 
     /**
-     * @dev Function to add ERC1155 token(s) to the bundle array.
+     * @dev Function to add ERC1155 token(s) to the bundle array & deposit tokens into this contract.
      * @param _from The address the ERC1155 tokens are coming from.
      * @param _tokenAddress The contract of the ERC1155 tokens.
      * @param _tokenIDs The token IDs for this bundle.
@@ -202,10 +230,19 @@ contract Loot is Admins, ReentrancyGuard {
      * @param _depositAmount The amount to deposit into this contract.
      */
     function addERC1155Token(address _from, address _tokenAddress, uint256[] calldata _tokenIDs, uint256[] calldata _amounts, uint256[] calldata _depositAmount) public onlyAdmins {
-        require(_tokenIDs.length > 0, "Must have token IDs");
         require(allowableLoot[_tokenAddress], "Token Address Not Allowed");
+        createERC1155Bundle(_tokenAddress, _tokenIDs, _amounts);
         IERC1155(_tokenAddress).safeBatchTransferFrom(_from, address(this), _tokenIDs, _depositAmount, "");
-        
+    }
+
+    /**
+     * @dev Function to add ERC1155 token(s) to the bundle array.
+     * @param _tokenAddress The contract of the ERC1155 tokens.
+     * @param _tokenIDs The token IDs for this bundle.
+     * @param _amounts The amount of each ID for this bundle.
+     */
+    function createERC1155Bundle(address _tokenAddress, uint256[] calldata _tokenIDs, uint256[] calldata _amounts) public onlyAdmins {
+        require(_tokenIDs.length > 0, "Must have token IDs");
         // Create a new ERC1155Token instance
         ERC1155Token memory newToken = ERC1155Token({
             tokenAddress: _tokenAddress,
@@ -213,7 +250,6 @@ contract Loot is Admins, ReentrancyGuard {
             balances: _amounts
         });
 
-        // Add the new bundle to the array
         ERC1155BundleID.push(newToken);
     }
 
@@ -261,6 +297,43 @@ contract Loot is Admins, ReentrancyGuard {
         return newLootBoxID;
     }
 
+    // /**
+    //  * @dev Function to create a Loot Box Key.
+    //  * @param _ERC20BundleID ID of the ERC20 bundle.
+    //  * @param _ERC721BundleID ID of the ERC721 bundle.
+    //  * @param _ERC1155BundleID ID of the ERC1155 bundle.
+    //  */
+    // function createLootBoxKey(
+    //     uint256 _ERC20BundleID,
+    //     uint256 _consumesERC20,
+    //     uint256 _ERC721BundleID,
+    //     uint256 _consumesERC721,
+    //     uint256 _ERC1155BundleID,
+    //     uint256 _consumesERC1155
+    // ) public onlyAdmins returns (uint256) {
+    //     require(_ERC20BundleID > 0 || _ERC721BundleID > 0 || _ERC1155BundleID > 0, "Loot box must contain at least one type of token");
+
+    //     // Create a new Loot Box
+    //     LootKey memory newLootBoxKey = LootKey({
+    //         erc20: ERC20BundleID[_ERC20BundleID],
+    //         consumesERC20: _consumesERC20,
+    //         erc721: ERC721BundleID[_ERC721BundleID],
+    //         consumesERC721: _consumesERC721,
+    //         erc1155: ERC1155BundleID[_ERC1155BundleID],
+    //         consumesERC1155: _consumesERC1155
+    //     });
+        
+    //     // Add the Loot Box Key to the array
+    //     uint256 newLootBoxKeyID = LootBoxKeyID.length;
+    //     LootBoxKeyID.push(newLootBoxKey);
+        
+    //     return newLootBoxKeyID;
+    // }
+
+    function setRequirementKeys(uint256 _LootBoxID) public {
+        //❌ ADD FUNCTION TO CREATE LOOT BOX KEYS FIRST THEN COMPLETE THIS FUNCTION ❌
+    }
+
     /**
      * @dev Allows the user an attempt to claim a specified loot box or voucher.
      * @param proofLoot bytes32 array for proof of loot.
@@ -269,9 +342,12 @@ contract Loot is Admins, ReentrancyGuard {
      * @param _LootBoxID Specified loot box ID.
      * Note: WARNING - Unauthorized attempts may cause user negative effects, NO CHEATING.
      */
-    function tryClaimLoot(bytes32[] memory proofLoot, bytes32[] memory proofPlayer, uint256 _LootID, uint256 _LootBoxID, bool claimLater) public nonReentrant {
-        require(verifyClaim(proofLoot, _LootID, _LootBoxID), "Cannot claim loot.");
-        // ❌ SET USER WITH TIMEOUT ADDING timeoutTime IF UNAUTHORIZED ATTEMPT ❌
+    function tryClaimLoot(bytes32[] memory proofLoot, bytes32[] memory proofPlayer, uint256 _LootID, uint256 _LootBoxID, bool claimLater) public nonReentrant {       
+        if(!verifyClaim(proofLoot, _LootID, _LootBoxID)){
+            // UNAUTHORIZED ATTEMPT
+            timeout[msg.sender] = block.timestamp + timeoutTime;
+            return;
+        }
 
         if(contestID[_LootID] != bytes32(0)){
             require(verifyPlayer(proofPlayer, _LootID, msg.sender), "Not entered in contest.");
