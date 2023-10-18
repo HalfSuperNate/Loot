@@ -67,6 +67,8 @@ contract Loot is Admins, ReentrancyGuard {
     ERC721Token[] public ERC721BundleID;
     ERC1155Token[] public ERC1155BundleID;
 
+    address public vault;
+
     event LootBoxCreated(uint256 lootBoxID, address creator);
 
     error LootAlreadyClaimed(uint256 lootBoxID);
@@ -80,13 +82,12 @@ contract Loot is Admins, ReentrancyGuard {
         initTokenBundles();
     }
 
-    // ✅ Added claimLoot Function To Merge Similar Loot Into A Single Box For Single Transaction Costs By Other Users ✅
+    // ✅ Enable Optimization at 200 runs ✅
     // ⭕️   Utilize ERC-6551:
     //      No change needed to current implementation here in this contract,
     //      a Loot Box ERC-721 token contract can be minted to hold multiple token types in one token as a TBA.    ⭕️
 
-    // SEE ❌'s BELOW FOR TODOs
-    //❌ NEED TO SHRINK DOWN BYTES SIZE LIMIT ❌
+    // SEE ❌'s BELOW FOR TODOs IF ANY
 
     /**
      * @dev Allow admins to set LootBox or contest root.
@@ -126,6 +127,14 @@ contract Loot is Admins, ReentrancyGuard {
      */
     function setAllowedContract(address _tokenAddress, bool _allow) public onlyAdmins {
         allowableLoot[_tokenAddress] = _allow;
+    }
+
+    /**
+     * @dev Allow admins to set the address for the vault.
+     * @param _newVault The address for the new vault.
+     */
+    function setVault(address _newVault) public onlyAdmins {
+        vault = _newVault;
     }
 
     /**
@@ -297,41 +306,44 @@ contract Loot is Admins, ReentrancyGuard {
         return newLootBoxID;
     }
 
-    // /**
-    //  * @dev Function to create a Loot Box Key.
-    //  * @param _ERC20BundleID ID of the ERC20 bundle.
-    //  * @param _ERC721BundleID ID of the ERC721 bundle.
-    //  * @param _ERC1155BundleID ID of the ERC1155 bundle.
-    //  */
-    // function createLootBoxKey(
-    //     uint256 _ERC20BundleID,
-    //     uint256 _consumesERC20,
-    //     uint256 _ERC721BundleID,
-    //     uint256 _consumesERC721,
-    //     uint256 _ERC1155BundleID,
-    //     uint256 _consumesERC1155
-    // ) public onlyAdmins returns (uint256) {
-    //     require(_ERC20BundleID > 0 || _ERC721BundleID > 0 || _ERC1155BundleID > 0, "Loot box must contain at least one type of token");
-
-    //     // Create a new Loot Box
-    //     LootKey memory newLootBoxKey = LootKey({
-    //         erc20: ERC20BundleID[_ERC20BundleID],
-    //         consumesERC20: _consumesERC20,
-    //         erc721: ERC721BundleID[_ERC721BundleID],
-    //         consumesERC721: _consumesERC721,
-    //         erc1155: ERC1155BundleID[_ERC1155BundleID],
-    //         consumesERC1155: _consumesERC1155
-    //     });
+    /**
+     * @dev Function to create a Loot Box Key.
+     * @param _ERC20BundleID ID of the ERC20 bundle.
+     * @param _ERC721BundleID ID of the ERC721 bundle.
+     * @param _ERC1155BundleID ID of the ERC1155 bundle.
+     */
+    function createLootBoxKey(
+        uint256 _ERC20BundleID,
+        uint256 _consumesERC20,
+        uint256 _ERC721BundleID,
+        uint256 _consumesERC721,
+        uint256 _ERC1155BundleID,
+        uint256 _consumesERC1155
+    ) public onlyAdmins returns (uint256) {
+        // Create a new Loot Box Key
+        LootKey memory newLootBoxKey = LootKey({
+            erc20: ERC20BundleID[_ERC20BundleID],
+            consumesERC20: _consumesERC20,
+            erc721: ERC721BundleID[_ERC721BundleID],
+            consumesERC721: _consumesERC721,
+            erc1155: ERC1155BundleID[_ERC1155BundleID],
+            consumesERC1155: _consumesERC1155
+        });
         
-    //     // Add the Loot Box Key to the array
-    //     uint256 newLootBoxKeyID = LootBoxKeyID.length;
-    //     LootBoxKeyID.push(newLootBoxKey);
+        // Add the Loot Box Key to the array
+        uint256 newLootBoxKeyID = LootBoxKeyID.length;
+        LootBoxKeyID.push(newLootBoxKey);
         
-    //     return newLootBoxKeyID;
-    // }
+        return newLootBoxKeyID;
+    }
 
-    function setRequirementKeys(uint256 _LootBoxID) public {
-        //❌ ADD FUNCTION TO CREATE LOOT BOX KEYS FIRST THEN COMPLETE THIS FUNCTION ❌
+    /**
+     * @dev Set the key for a specific Loot Box.
+     * @param _LootBoxID The unique ID of the Loot Box.
+     * @param _LootBoxKeyID The key ID to associate with the Loot Box.
+     */
+    function setLootBoxKey(uint256 _LootBoxID, uint256 _LootBoxKeyID) public {
+        LootBoxKey[_LootBoxID] = _LootBoxKeyID;
     }
 
     /**
@@ -359,7 +371,7 @@ contract Loot is Admins, ReentrancyGuard {
         
         bool _voucher;
         // does contract hold all the tokens in the given loot box
-        if(!thisHasThatLoot(_LootBoxID, 0)){
+        if(!addressHasThatLoot(address(this), _LootBoxID, 0)){
             _voucher = true;
         }
 
@@ -396,7 +408,7 @@ contract Loot is Admins, ReentrancyGuard {
      * @dev If `_MergeClaim` is true, the user can claim multiple loot items together if they have enough vouchers.
      */
     function claimLoot(address claimer, uint256 _LootBoxID, bool _MergeClaim) public nonReentrant {
-        if(lootBoxVoucher[claimer][_LootBoxID] <= 0 || !thisHasThatLoot(_LootBoxID, 0)){
+        if(lootBoxVoucher[claimer][_LootBoxID] <= 0 || !addressHasThatLoot(address(this), _LootBoxID, 0)){
             revert LootUnavailable(_LootBoxID);
         }
 
@@ -413,7 +425,7 @@ contract Loot is Admins, ReentrancyGuard {
     }
 
     /**
-     * @notice Internal function to process loot claims for a specified Loot Box.
+     * @notice Internal function to process loot claims for a specified Loot Box, consumes keys if required.
      * @param claimer The address of the user claiming the loot.
      * @param _LootBoxID The unique ID of the Loot Box being claimed.
      * @param claimCount The number of loot items to claim.
@@ -421,10 +433,38 @@ contract Loot is Admins, ReentrancyGuard {
      * @dev Transfers ERC20, ERC721, and ERC1155 tokens to the claimer based on the Loot Box contents.
      */
     function iClaim(address claimer, uint256 _LootBoxID, uint256 claimCount) internal nonReentrant {
-        //❌ ADD REQUIREMENTS FUNCTION TO OPEN LOOT BOX ❌
         address _erc20_Contract = LootBoxID[_LootBoxID].erc20.tokenAddress;
         address _erc721_Contract = LootBoxID[_LootBoxID].erc721.tokenAddress;
         address _erc1155_Contract = LootBoxID[_LootBoxID].erc1155.tokenAddress;
+
+        uint256 _LootBoxKey = LootBoxKey[_LootBoxID];
+        if(_LootBoxKey != 0){
+            require(addressHasThatLoot(claimer, _LootBoxID, 5533999), "Keys Required To Open Loot Box");
+            LootKey memory _LootKey = LootBoxKeyID[_LootBoxKey];
+            address _erc20_Key = LootBoxKeyID[_LootBoxKey].erc20.tokenAddress;
+            address _erc721_Key = LootBoxKeyID[_LootBoxKey].erc721.tokenAddress;
+            address _erc1155_Key = LootBoxKeyID[_LootBoxKey].erc1155.tokenAddress;
+
+            if(_erc20_Key != address(0)){
+                if(_LootKey.consumesERC20 > 0){
+                    IERC20(_erc20_Key).transferFrom(claimer, vault, _LootKey.consumesERC20);
+                }
+            }
+
+            if(_erc721_Key != address(0)){
+                if(_LootKey.consumesERC721 > 0){
+                    for (uint256 i = 0; i < _LootKey.erc721.tokenIDs.length; i++) {
+                        IERC721(_erc721_Key).safeTransferFrom(claimer, vault, _LootKey.erc721.tokenIDs[i]);
+                    }
+                }
+            }
+
+            if(_erc1155_Contract != address(0)){
+                if(_LootKey.consumesERC1155 > 0){
+                    IERC1155(_erc1155_Key).safeBatchTransferFrom(claimer, vault, _LootKey.erc1155.tokenIDs, _LootKey.erc1155.balances,"");
+                }
+            }
+        }
 
         if(availableLootBoxes[_LootBoxID] <= 0){
             // second check if last of the loot box supply, mark as claimed
@@ -438,56 +478,55 @@ contract Loot is Admins, ReentrancyGuard {
         }
         
         if(_erc721_Contract != address(0)){
-            uint256[] storage _erc721_LootTokens = LootBoxID[_LootBoxID].erc721.tokenIDs;
             // Send ERC721 tokens to claimer
-            for (uint256 i = 0; i < _erc721_LootTokens.length; i++) {
-                IERC721(_erc721_Contract).safeTransferFrom(address(this), claimer, _erc721_LootTokens[i]);
+            for (uint256 i = 0; i < LootBoxID[_LootBoxID].erc721.tokenIDs.length; i++) {
+                IERC721(_erc721_Contract).safeTransferFrom(address(this), claimer, LootBoxID[_LootBoxID].erc721.tokenIDs[i]);
             }
         }
         
         if(_erc1155_Contract != address(0)){
-            uint256[] storage _erc1155_LootTokens = LootBoxID[_LootBoxID].erc1155.tokenIDs;
             uint256[] memory _erc1155_LootAmounts = multiplyArray(LootBoxID[_LootBoxID].erc1155.balances, claimCount);
             // Send ERC1155 tokens to claimer
-            IERC1155(_erc1155_Contract).safeBatchTransferFrom(address(this), claimer, _erc1155_LootTokens, _erc1155_LootAmounts,"");
+            IERC1155(_erc1155_Contract).safeBatchTransferFrom(address(this), claimer, LootBoxID[_LootBoxID].erc1155.tokenIDs, _erc1155_LootAmounts,"");
         }
     }
 
     /**
-     * @dev Verify if this contract has the Loot for a specified LootBox.
+     * @dev Verify if address has the Loot or Key for a specified LootBox.
      * @param _LootBoxID Specified loot box ID.
-     * @param _tokenType Types are either 20, 721, 1155, or 0 for all three types.
+     * @param _tokenType Types are either 20, 721, 1155, or 0 for all three types or use 5533999 for key checks.
      * Note: If token address is address(0) it is skipped over and defaults as true.
      */
-    function thisHasThatLoot(uint256 _LootBoxID, uint256 _tokenType) public view returns (bool) {
-        require(_tokenType == 0 || _tokenType == 20 || _tokenType == 721 || _tokenType == 1155, "Invalid token type.");
+    function addressHasThatLoot(address _address, uint256 _LootBoxID, uint256 _tokenType) public view returns (bool) {
+        require(_tokenType == 0 || _tokenType == 20 || _tokenType == 721 || _tokenType == 1155 || _tokenType == 5533999, "Invalid token type.");
 
-        ERC20Token storage erc20Token = LootBoxID[_LootBoxID].erc20;
-        ERC721Token storage erc721Token = LootBoxID[_LootBoxID].erc721;
-        ERC1155Token storage erc1155Token = LootBoxID[_LootBoxID].erc1155;
+        uint256 _LootBoxKeyID = LootBoxKey[_LootBoxID];
+        ERC20Token storage erc20Token = (_tokenType == 5533999) ? LootBoxKeyID[_LootBoxKeyID].erc20 : LootBoxID[_LootBoxID].erc20;
+        ERC721Token storage erc721Token = (_tokenType == 5533999) ? LootBoxKeyID[_LootBoxKeyID].erc721 : LootBoxID[_LootBoxID].erc721;
+        ERC1155Token storage erc1155Token = (_tokenType == 5533999) ? LootBoxKeyID[_LootBoxKeyID].erc1155 : LootBoxID[_LootBoxID].erc1155;
 
-        if ((_tokenType == 0 || _tokenType == 20) && erc20Token.tokenAddress != address(0) && erc20BalanceOf(erc20Token.tokenAddress, address(this)) < erc20Token.balance){
+        if ((_tokenType == 0 || _tokenType == 20 || _tokenType == 5533999) && erc20Token.tokenAddress != address(0) && erc20BalanceOf(erc20Token.tokenAddress, _address) < erc20Token.balance){
             return false;
         }
 
-        if ((_tokenType == 0 || _tokenType == 721) && erc721Token.tokenAddress != address(0)){
+        if ((_tokenType == 0 || _tokenType == 721 || _tokenType == 5533999) && erc721Token.tokenAddress != address(0)){
             uint256[] storage erc721TokenIDs = erc721Token.tokenIDs;
             uint256 erc721TokenIDsLength = erc721TokenIDs.length;
 
             for (uint256 i = 0; i < erc721TokenIDsLength; i++) {
                 uint256 _tokenID = erc721TokenIDs[i];
-                if (erc721OwnerOf(erc721Token.tokenAddress, _tokenID, address(this)) < 1) {
+                if (erc721OwnerOf(erc721Token.tokenAddress, _tokenID, _address) < 1) {
                     return false;
                 }
             }
         }
 
-        if ((_tokenType == 0 || _tokenType == 1155) && erc1155Token.tokenAddress != address(0)){
+        if ((_tokenType == 0 || _tokenType == 1155 || _tokenType == 5533999) && erc1155Token.tokenAddress != address(0)){
             uint256[] storage erc1155TokenIDs = erc1155Token.tokenIDs;
             uint256[] storage erc1155Balances = erc1155Token.balances;
             uint256 erc1155TokenIDsLength = erc1155TokenIDs.length;
 
-            uint256[] memory _balances = erc1155BalanceOfBatch(erc1155Token.tokenAddress, erc1155TokenIDs, repeatAddressArray(address(this), erc1155TokenIDsLength), false);
+            uint256[] memory _balances = erc1155BalanceOfBatch(erc1155Token.tokenAddress, erc1155TokenIDs, repeatAddressArray(_address, erc1155TokenIDsLength), false);
 
             for (uint256 i = 0; i < erc1155TokenIDsLength; i++) {
                 uint256 _tokenAmount = erc1155Balances[i];
@@ -625,7 +664,7 @@ contract Loot is Admins, ReentrancyGuard {
         return (false);
     }
 
-    // Initialize empty data for ERC20, ERC721, and ERC1155 tokens then push an empty LootBox
+    // Initialize empty data for ERC20, ERC721, and ERC1155 tokens then push an empty LootBox & LootKey
     function initTokenBundles() internal {
         require(LootBoxID.length == 0);
         ERC20Token memory newToken = ERC20Token({
@@ -658,7 +697,18 @@ contract Loot is Admins, ReentrancyGuard {
             claimed: false
         });
 
+        LootKey memory newLootBoxKey = LootKey({
+            erc20: newToken,
+            consumesERC20: 0,
+            erc721: _newToken,
+            consumesERC721: 0,
+            erc1155: __newToken,
+            consumesERC1155: 0
+        });
+
         LootBoxID.push(newLootBox);
+        LootBoxKeyID.push(newLootBoxKey);
+        vault = msg.sender;
     }
 
 }
